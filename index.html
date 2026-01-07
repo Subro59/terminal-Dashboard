@@ -33,18 +33,13 @@
             width: 8px;
         }
 
-        .table-container::-webkit-scrollbar-track {
-            background: #1e293b;
-        }
-
+        .table-container::-webkit-scrollbar-track { background: #1e293b; }
         .table-container::-webkit-scrollbar-thumb {
             background-color: #475569;
             border-radius: 20px;
         }
 
-        tr:hover td {
-            background-color: rgba(51, 65, 85, 0.5);
-        }
+        tr:hover td { background-color: rgba(51, 65, 85, 0.5); }
 
         .status-badge {
             padding: 2px 8px;
@@ -54,12 +49,15 @@
             text-transform: uppercase;
         }
 
-        #api-script-container { display: none; }
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .pulse-error { animation: pulse-red 2s infinite; }
     </style>
 </head>
 <body class="p-4 md:p-8 pb-20">
-
-    <div id="api-script-container"></div>
 
     <div class="max-w-full mx-auto space-y-8">
         <!-- Header -->
@@ -67,12 +65,12 @@
             <div>
                 <h1 class="text-3xl font-bold text-white tracking-tight">Terminal Dashboard</h1>
                 <div class="flex items-center gap-2 mt-1">
-                    <span id="connection-status" class="w-2 h-2 rounded-full bg-red-500"></span>
-                    <p id="status-text" class="text-slate-400 text-sm">System Offline</p>
+                    <span id="connection-status" class="w-3 h-3 rounded-full bg-slate-600"></span>
+                    <p id="status-text" class="text-slate-400 text-sm font-medium italic">Initializing system...</p>
                 </div>
             </div>
             <div class="flex items-center gap-4">
-                <button onclick="fetchSheetData()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl flex items-center gap-2 transition-all active:scale-95 font-semibold shadow-lg shadow-blue-500/25">
+                <button id="sync-btn" onclick="fetchSheetData()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl flex items-center gap-2 transition-all active:scale-95 font-semibold shadow-lg shadow-blue-500/25">
                     <i class="fas fa-sync-alt" id="refresh-icon"></i> 
                     <span>Sync Live Data</span>
                 </button>
@@ -128,7 +126,8 @@
                     <div class="relative inline-block">
                         <div class="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
                     </div>
-                    <p class="text-slate-400 mt-6 font-medium animate-pulse" id="loading-text">Fetching live data from Google Sheets...</p>
+                    <p class="text-slate-400 mt-6 font-medium animate-pulse" id="loading-text">Fetching live data...</p>
+                    <p id="debug-info" class="text-[10px] text-slate-600 mt-2 font-mono"></p>
                 </div>
 
                 <div class="table-container overflow-x-auto" id="table-wrapper">
@@ -172,11 +171,11 @@
                 <!-- Table Footer -->
                 <div class="p-5 border-t border-slate-700 bg-slate-900/50 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div class="flex items-center gap-3">
-                        <span id="last-sync-badge" class="bg-slate-800 text-slate-400 px-3 py-1 rounded-md text-[10px] font-bold uppercase">Not Synced</span>
+                        <span id="last-sync-badge" class="bg-slate-800 text-slate-400 px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider">Session Initialized</span>
                     </div>
                     <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                        Total Records: <span id="total-count" class="text-blue-400">0</span> | 
-                        Filtered: <span id="visible-count" class="text-emerald-400">0</span>
+                        Records: <span id="total-count" class="text-blue-400">0</span> | 
+                        Match: <span id="visible-count" class="text-emerald-400">0</span>
                     </div>
                 </div>
             </div>
@@ -184,248 +183,211 @@
     </div>
 
     <script>
-        // CORE API CONFIGURATION
         const API_URL = 'https://script.google.com/macros/s/AKfycbwuM4K_keHHxyJSY6RmtSzWljiClcXWUC2eEkZ4DNN5fQaSDasVRx8E6YM-Zin7_Rgo0A/exec';
         let terminalData = [];
-        let isFetching = false;
 
-        /**
-         * GLOBAL CALLBACK FOR JSONP
-         * This must remain in the global window scope
-         */
-        window.handleApiResponse = function(response) {
-            console.log("Data Payload Received:", response);
-            isFetching = false;
+        // Globally accessible response handler for JSONP
+        window.handleDataResponse = function(response) {
+            console.log("Handshake successful, processing payload...");
+            setOnlineStatus('connected');
             
-            // Handle various possible GAS response structures
             const raw = response.data || response.items || response.records || (Array.isArray(response) ? response : null);
             
             if (raw && Array.isArray(raw)) {
-                processData(raw);
-                setOnlineStatus(true);
-                renderTable();
-                updateStats();
+                processRows(raw);
+                renderUI();
                 document.getElementById('last-sync-badge').textContent = "Synced: " + new Date().toLocaleTimeString();
             } else {
-                showError("Invalid data format received.");
+                setOnlineStatus('error', "Invalid Payload Format");
             }
             hideLoading();
         };
 
         async function fetchSheetData() {
-            if (isFetching) return;
-            isFetching = true;
-            
             showLoading();
-            const timestamp = Date.now();
-            const scriptUrl = `${API_URL}?callback=handleApiResponse&v=${timestamp}`;
-
-            // Create and inject the script tag
-            const container = document.getElementById('api-script-container');
-            container.innerHTML = ''; // Clear previous
+            setOnlineStatus('pending');
             
-            const script = document.createElement('script');
-            script.src = scriptUrl;
-            script.async = true;
+            const debug = document.getElementById('debug-info');
+            debug.textContent = `Injecting transport layer...`;
 
-            // Timeout Logic
-            const fetchTimeout = setTimeout(() => {
-                if (isFetching) {
-                    isFetching = false;
-                    showError("Connection timed out. Retrying alternate method...");
-                    // Try a one-off fetch as last resort
-                    fetchFallback();
-                }
-            }, 12000);
+            // Remove any existing script elements to prevent clutter
+            const oldScripts = document.querySelectorAll('.jsonp-transport');
+            oldScripts.forEach(s => s.remove());
 
-            script.onerror = () => {
-                clearTimeout(fetchTimeout);
-                isFetching = false;
-                showError("CORS/MIME Blocked. Check App Script Deployment.");
-                hideLoading();
-                if (terminalData.length === 0) loadMockData();
-            };
-
-            container.appendChild(script);
-        }
-
-        async function fetchFallback() {
             try {
-                // This will likely fail CORS but in some browser configs it triggers the redirect cache
-                await fetch(API_URL, { mode: 'no-cors' });
-                document.getElementById('loading-text').textContent = "Waiting for redirect response...";
-            } catch(e) {
-                console.error("Fallback failed", e);
+                const script = document.createElement('script');
+                script.className = 'jsonp-transport';
+                // Use the standardized "callback" parameter name for GAS
+                script.src = `${API_URL}?callback=handleDataResponse&t=${Date.now()}`;
+                
+                script.onerror = (err) => {
+                    console.error("Transport layer failure:", err);
+                    setOnlineStatus('error', "Script Blocked by Browser");
+                    hideLoading();
+                    if (terminalData.length === 0) populateOfflineMode();
+                };
+
+                document.body.appendChild(script);
+
+                // Timeout logic
+                setTimeout(() => {
+                    if (!document.getElementById('loading-overlay').classList.contains('hidden')) {
+                        setOnlineStatus('error', "Server Not Responding");
+                        hideLoading();
+                    }
+                }, 12000);
+
+            } catch (err) {
+                console.error("Initialization error:", err);
+                setOnlineStatus('error', "Init Error");
+                hideLoading();
             }
         }
 
-        function processData(rows) {
+        function processRows(rows) {
             if (!rows || rows.length === 0) return;
+            const firstRow = rows[0] || [];
+            // Auto-detect if first row is header
+            const startIdx = firstRow.some(cell => String(cell).toLowerCase().includes('tid')) ? 1 : 0;
             
-            // Detect if first row is headers
-            const firstRowStr = String(rows[0][0] || '').toLowerCase();
-            const hasHeader = firstRowStr.includes('s/n') || firstRowStr.includes('tid');
-            const dataRows = hasHeader ? rows.slice(1) : rows;
-
-            terminalData = dataRows.filter(row => row.length > 0).map((row, i) => ({
-                sn: row[0] || (i + 1),
-                tid: row[1] || 'N/A',
-                mid: row[2] || '',
-                merchant: row[3] || '',
-                dba: row[4] || '',
-                address: row[5] || '',
-                contact: row[6] || '',
-                phone: row[7] || '',
-                district: row[8] || '',
-                division: row[9] || '',
-                zone: row[10] || '',
-                pos_sn: row[11] || '',
-                operator: row[12] || '',
-                sim: row[13] || '',
-                sim_ip: row[14] || '',
-                host_ip: row[15] || '',
-                port: row[16] || '',
-                vendor: row[17] || '',
-                emi: row[18] || '',
-                min_amt: row[19] || '',
-                remarks: row[20] || '',
-                conf_by: row[21] || '',
-                conf_date: row[22] || '',
-                depl_by: row[23] || '',
-                depl_date: row[24] || '',
-                roll_by: row[25] || '',
-                roll_date: row[26] || '',
-                version: row[27] || '1.0'
-            }));
+            terminalData = rows.slice(startIdx)
+                .filter(r => r && r.length > 1)
+                .map((row, i) => ({
+                    sn: row[0] || (i + 1),
+                    tid: row[1] || '---',
+                    mid: row[2] || '',
+                    merchant: row[3] || '',
+                    dba: row[4] || '',
+                    address: row[5] || '',
+                    contact: row[6] || '',
+                    phone: row[7] || '',
+                    district: row[8] || '',
+                    division: row[9] || '',
+                    zone: row[10] || '',
+                    pos_sn: row[11] || '',
+                    operator: row[12] || '',
+                    sim: row[13] || '',
+                    sim_ip: row[14] || '',
+                    host_ip: row[15] || '',
+                    port: row[16] || '',
+                    vendor: row[17] || '',
+                    emi: row[18] || '',
+                    min_amt: row[19] || '',
+                    remarks: row[20] || '',
+                    conf_by: row[21] || '',
+                    conf_date: row[22] || '',
+                    depl_by: row[23] || '',
+                    depl_date: row[24] || '',
+                    roll_by: row[25] || '',
+                    roll_date: row[26] || '',
+                    version: row[27] || '1.0'
+                }));
         }
 
-        function renderTable() {
+        function renderUI() {
             const tbody = document.getElementById('terminalTableBody');
             tbody.innerHTML = '';
             
-            if (terminalData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="28" class="p-20 text-center text-slate-500 font-medium italic">No terminal records found. Check your spreadsheet.</td></tr>';
-                return;
-            }
-
             terminalData.forEach(item => {
                 const row = document.createElement('tr');
                 row.className = "hover:bg-blue-500/5 transition-colors group";
                 
-                const cols = [
-                    item.sn, 
-                    `<span class="font-mono font-bold text-blue-400">${item.tid}</span>`, 
-                    item.mid, 
-                    `<span class="text-white font-medium">${item.merchant}</span>`,
-                    item.dba, item.address, item.contact, item.phone, item.district, item.division,
-                    item.zone, item.pos_sn, item.operator, item.sim, item.sim_ip, item.host_ip, 
+                const cells = [
+                    item.sn, item.tid, item.mid, item.merchant, item.dba, item.address,
+                    item.contact, item.phone, item.district, item.division, item.zone,
+                    item.pos_sn, item.operator, item.sim, item.sim_ip, item.host_ip,
                     item.port, item.vendor, item.emi, item.min_amt, item.remarks,
-                    item.conf_by, item.conf_date, item.depl_by, 
-                    `<span class="text-emerald-400 font-semibold">${item.depl_date}</span>`,
-                    item.roll_by, item.roll_date,
-                    `<span class="status-badge ${String(item.version).startsWith('2') ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}">V${item.version}</span>`
+                    item.conf_by, item.conf_date, item.depl_by, item.depl_date,
+                    item.roll_by, item.roll_date, item.version
                 ];
+
+                row.innerHTML = cells.map((c, idx) => {
+                    let content = c || '-';
+                    if (idx === 1) content = `<span class="font-mono font-bold text-blue-400">${c}</span>`;
+                    if (idx === 3) content = `<span class="text-white font-medium">${c}</span>`;
+                    if (idx === 24) content = `<span class="text-emerald-400 font-semibold">${c}</span>`;
+                    if (idx === 27) content = `<span class="status-badge ${String(c).startsWith('2') ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}">V${c}</span>`;
+                    return `<td class="p-5 whitespace-nowrap border-r border-slate-800/30 last:border-0">${content}</td>`;
+                }).join('');
                 
-                row.innerHTML = cols.map(c => `<td class="p-5 whitespace-nowrap border-r border-slate-800/30 last:border-0">${c || '-'}</td>`).join('');
                 tbody.appendChild(row);
             });
 
+            document.getElementById('stat-total').textContent = terminalData.length.toLocaleString();
+            document.getElementById('stat-live').textContent = terminalData.filter(t => t.depl_date && t.depl_date !== '-').length.toLocaleString();
+            document.getElementById('stat-v2').textContent = terminalData.filter(t => String(t.version).startsWith('2')).length.toLocaleString();
             document.getElementById('total-count').textContent = terminalData.length;
             document.getElementById('visible-count').textContent = terminalData.length;
         }
 
-        function updateStats() {
-            const total = terminalData.length;
-            const deployed = terminalData.filter(t => String(t.depl_date).trim() !== '').length;
-            const v2 = terminalData.filter(t => String(t.version).startsWith('2')).length;
+        function setOnlineStatus(type, msg = "") {
+            const dot = document.getElementById('connection-status');
+            const text = document.getElementById('status-text');
+            dot.className = "w-3 h-3 rounded-full";
             
-            animateCounter('stat-total', total);
-            animateCounter('stat-live', deployed);
-            animateCounter('stat-v2', v2);
-        }
-
-        function animateCounter(id, target) {
-            let current = 0;
-            const element = document.getElementById(id);
-            const step = Math.ceil(target / 20) || 1;
-            const interval = setInterval(() => {
-                current += step;
-                if (current >= target) {
-                    element.textContent = target.toLocaleString();
-                    clearInterval(interval);
-                } else {
-                    element.textContent = current.toLocaleString();
-                }
-            }, 30);
+            if (type === 'connected') {
+                dot.classList.add('bg-emerald-500', 'shadow-[0_0_8px_rgba(16,185,129,0.5)]');
+                text.textContent = "Live Link Active";
+                text.className = "text-emerald-400 text-sm font-medium";
+            } else if (type === 'pending') {
+                dot.classList.add('bg-blue-500', 'animate-pulse');
+                text.textContent = "Negotiating handshake...";
+                text.className = "text-blue-400 text-sm font-medium italic";
+            } else {
+                dot.classList.add('bg-red-500', 'pulse-error');
+                text.textContent = msg || "Handshake Failed";
+                text.className = "text-red-400 text-sm font-bold";
+            }
         }
 
         function showLoading() {
             document.getElementById('loading-overlay').classList.remove('hidden');
-            document.getElementById('table-wrapper').classList.add('opacity-20', 'pointer-events-none');
+            document.getElementById('table-wrapper').classList.add('opacity-10');
             document.getElementById('refresh-icon').classList.add('fa-spin');
         }
 
         function hideLoading() {
             document.getElementById('loading-overlay').classList.add('hidden');
-            document.getElementById('table-wrapper').classList.remove('opacity-20', 'pointer-events-none');
+            document.getElementById('table-wrapper').classList.remove('opacity-10');
             document.getElementById('refresh-icon').classList.remove('fa-spin');
         }
 
-        function setOnlineStatus(online) {
-            const dot = document.getElementById('connection-status');
-            const text = document.getElementById('status-text');
-            if (online) {
-                dot.className = "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
-                text.textContent = "Live Link Active";
-                text.className = "text-emerald-400 text-sm font-medium";
-            } else {
-                dot.className = "w-2 h-2 rounded-full bg-red-500";
-                text.textContent = "Connection Error";
-                text.className = "text-red-400 text-sm font-medium";
-            }
+        function populateOfflineMode() {
+            document.getElementById('terminalTableBody').innerHTML = `
+                <tr>
+                    <td colspan="28" class="p-20 text-center">
+                        <div class="flex flex-col items-center">
+                            <i class="fas fa-exclamation-triangle text-3xl text-red-500 mb-4"></i>
+                            <p class="text-slate-400 max-w-md mb-2">Browser blocked script execution from the Google server.</p>
+                            <p class="text-slate-500 text-xs">Ensure your Google Apps Script is deployed as "Web App" with Access: "Anyone".</p>
+                            <button onclick="fetchSheetData()" class="mt-6 text-blue-400 hover:text-blue-300 font-bold underline transition-colors">Retry Connection</button>
+                        </div>
+                    </td>
+                </tr>`;
         }
 
-        function showError(msg) {
-            console.error(msg);
-            setOnlineStatus(false);
-            const badge = document.getElementById('last-sync-badge');
-            badge.textContent = "Error: Connection Failed";
-            badge.className = "bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-[10px] font-bold uppercase";
-        }
-
-        function loadMockData() {
-            terminalData = [{
-                sn: 1, tid: "OFFLINE_MODE", merchant: "System couldn't reach Google API",
-                remarks: "Check 'Anyone' access in GAS", version: "1.0"
-            }];
-            renderTable();
-        }
-
-        function initTimer() {
+        function initClock() {
             const update = () => {
                 const now = new Date();
                 document.getElementById('current-date').textContent = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
                 document.getElementById('current-time').textContent = now.toLocaleTimeString('en-US', { hour12: false });
             };
-            update();
-            setInterval(update, 1000);
+            update(); setInterval(update, 1000);
         }
 
         window.onload = () => {
-            initTimer();
+            initClock();
             fetchSheetData();
-
-            // Search filtering
             document.getElementById('tableSearch').addEventListener('input', (e) => {
                 const term = e.target.value.toLowerCase();
                 const rows = document.querySelectorAll('#terminalTableBody tr');
-                let visible = 0;
+                let count = 0;
                 rows.forEach(row => {
                     const match = row.textContent.toLowerCase().includes(term);
                     row.style.display = match ? '' : 'none';
-                    if (match) visible++;
+                    if (match) count++;
                 });
-                document.getElementById('visible-count').textContent = visible;
+                document.getElementById('visible-count').textContent = count;
             });
         };
     </script>
