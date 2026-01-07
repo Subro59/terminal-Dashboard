@@ -55,6 +55,17 @@
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
         .pulse-error { animation: pulse-red 2s infinite; }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        .validation-error {
+            border-color: #ef4444 !important;
+            background-color: rgba(239, 68, 68, 0.05) !important;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8 pb-20">
@@ -63,7 +74,7 @@
         <!-- Header -->
         <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6">
             <div>
-                <h1 class="text-3xl font-bold text-white tracking-tight">Terminal Dashboard</h1>
+                <h1 class="text-3xl font-bold text-white tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">Terminal Dashboard</h1>
                 <div class="flex items-center gap-2 mt-1">
                     <span id="connection-status" class="w-3 h-3 rounded-full bg-slate-600"></span>
                     <p id="status-text" class="text-slate-400 text-sm font-medium italic">Initializing system...</p>
@@ -168,7 +179,6 @@
                     </table>
                 </div>
                 
-                <!-- Table Footer -->
                 <div class="p-5 border-t border-slate-700 bg-slate-900/50 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div class="flex items-center gap-3">
                         <span id="last-sync-badge" class="bg-slate-800 text-slate-400 px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider">Session Initialized</span>
@@ -180,33 +190,84 @@
                 </div>
             </div>
         </section>
+
+        <!-- Update Section (Now under the Inventory) -->
+        <section class="glass-card p-6 border-l-4 border-l-blue-500">
+            <div class="flex items-center gap-3 mb-6">
+                <span class="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                    <i class="fas fa-edit text-blue-500"></i>
+                </span>
+                <div>
+                    <h2 class="text-xl font-bold text-white">Update Deployment Info</h2>
+                    <p class="text-slate-400 text-xs">Modifying specific parameters for a registered TID</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target TID <span class="text-red-500">*</span></label>
+                    <input type="text" id="update-tid" placeholder="TID Required" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white transition-all">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Deploy By</label>
+                    <input type="text" id="update-deploy-by" placeholder="Name" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Deploy Date</label>
+                    <input type="date" id="update-deploy-date" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Roll-out By</label>
+                    <input type="text" id="update-roll-by" placeholder="Name" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Roll-out Date</label>
+                    <input type="date" id="update-roll-date" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Version</label>
+                    <select id="update-version" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                        <option value="">- Select -</option>
+                        <option value="1.0">V1.0</option>
+                        <option value="2.0">V2.0</option>
+                        <option value="2.1">V2.1</option>
+                        <option value="3.0">V3.0</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-between items-center">
+                <p class="text-[10px] text-slate-500 italic max-w-md">
+                    * If Deploy By is provided, Deploy Date is required. If Roll-out By is provided, Roll-out Date & Version are required.
+                </p>
+                <button onclick="submitUpdate()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-500/20">
+                    <i class="fas fa-check-circle"></i>
+                    Save Update
+                </button>
+            </div>
+        </section>
     </div>
 
+    <!-- Notification Overlay -->
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-2xl transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none font-bold text-sm z-50"></div>
+
     <script>
-        // Secure configuration for Google Apps Script integration
-        const SCRIPT_ID = 'AKfycbz58FKVMuIl8pCtbZx9uACo8Q-rtsuhZvDE1_NshV04BuFTWQ4GfDUztTBLPhNFRC5aXA/exec';
+        const SCRIPT_ID = 'AKfycbwuM4K_keHHxyJSY6RmtSzWljiClcXWUC2eEkZ4DNN5fQaSDasVRx8E6YM-Zin7_Rgo0A';
         const API_URL = `https://script.google.com/macros/s/${SCRIPT_ID}/exec`;
         let terminalData = [];
 
-        /**
-         * Robust data fetching using exponential retry and JSONP bypass
-         */
         async function fetchSheetData() {
             showLoading();
             setOnlineStatus('pending');
             const debug = document.getElementById('debug-info');
             debug.textContent = "Negotiating secure link...";
 
-            // Clean up previous attempts
             const existing = document.getElementById('data-bridge');
             if (existing) existing.remove();
 
-            // We use a JSONP approach but with enhanced error handling
-            // and an explicit timeout to prevent hanging
             const callbackName = 'google_jsonp_' + Math.round(Math.random() * 1000000);
             
             window[callbackName] = function(response) {
-                console.log("Remote signal received.");
                 handleDataResponse(response);
                 delete window[callbackName];
                 clearTimeout(timeoutHandle);
@@ -218,14 +279,12 @@
             
             const timeoutHandle = setTimeout(() => {
                 if (document.getElementById('loading-overlay').classList.contains('hidden')) return;
-                console.warn("Connection timeout. Trying cross-origin relay...");
                 setOnlineStatus('error', "CORS/Handshake Timeout");
                 hideLoading();
                 if (terminalData.length === 0) populateOfflineMode();
             }, 15000);
 
             script.onerror = () => {
-                console.error("System transport layer blocked.");
                 setOnlineStatus('error', "Shield Block (CORS)");
                 hideLoading();
                 if (terminalData.length === 0) populateOfflineMode();
@@ -236,7 +295,6 @@
 
         function handleDataResponse(response) {
             setOnlineStatus('connected');
-            // Support multiple possible response formats from GAS
             const raw = response.data || response.items || response.records || (Array.isArray(response) ? response : null);
             
             if (raw && Array.isArray(raw)) {
@@ -251,7 +309,6 @@
 
         function processRows(rows) {
             if (!rows || rows.length === 0) return;
-            // Detect header row dynamically
             const firstRowStr = JSON.stringify(rows[0]).toLowerCase();
             const startIdx = firstRowStr.includes('tid') || firstRowStr.includes('merchant') ? 1 : 0;
             
@@ -259,7 +316,7 @@
                 .filter(r => r && r.length > 1)
                 .map((row, i) => ({
                     sn: row[0] || (i + 1),
-                    tid: row[1] || '---',
+                    tid: String(row[1] || '').trim(),
                     mid: row[2] || '',
                     merchant: row[3] || '',
                     dba: row[4] || '',
@@ -295,6 +352,7 @@
             
             terminalData.forEach(item => {
                 const row = document.createElement('tr');
+                row.id = `tid-row-${item.tid}`;
                 row.className = "hover:bg-blue-500/5 transition-colors group";
                 
                 const cells = [
@@ -323,6 +381,113 @@
             document.getElementById('stat-v2').textContent = terminalData.filter(t => String(t.version).startsWith('2')).length.toLocaleString();
             document.getElementById('total-count').textContent = terminalData.length;
             document.getElementById('visible-count').textContent = terminalData.length;
+        }
+
+        function submitUpdate() {
+            // Reset validation states
+            document.querySelectorAll('.validation-error').forEach(el => el.classList.remove('validation-error'));
+
+            const tidInput = document.getElementById('update-tid');
+            const deployByInput = document.getElementById('update-deploy-by');
+            const deployDateInput = document.getElementById('update-deploy-date');
+            const rollByInput = document.getElementById('update-roll-by');
+            const rollDateInput = document.getElementById('update-roll-date');
+            const versionInput = document.getElementById('update-version');
+
+            const tid = tidInput.value.trim();
+            const deployBy = deployByInput.value.trim();
+            const deployDate = deployDateInput.value;
+            const rollBy = rollByInput.value.trim();
+            const rollDate = rollDateInput.value;
+            const version = versionInput.value;
+
+            // 1. Mandatory TID check
+            if (!tid) {
+                tidInput.classList.add('validation-error');
+                showToast("Please enter a Target TID", "error");
+                return;
+            }
+
+            const record = terminalData.find(t => t.tid === tid);
+            if (!record) {
+                tidInput.classList.add('validation-error');
+                showToast(`TID ${tid} not found`, "error");
+                return;
+            }
+
+            // 2. Deployment Block Validation
+            if (deployBy && !deployDate) {
+                deployDateInput.classList.add('validation-error');
+                showToast("Deploy Date is required if Deploy By is filled", "error");
+                return;
+            }
+
+            // 3. Roll-out Block Validation
+            if (rollBy && (!rollDate || !version)) {
+                if (!rollDate) rollDateInput.classList.add('validation-error');
+                if (!version) versionInput.classList.add('validation-error');
+                showToast("Roll-out Date & Version are required if Roll-out By is filled", "error");
+                return;
+            }
+
+            // Check if anything is actually being updated
+            if (!deployBy && !rollBy && !version) {
+                showToast("Enter at least one update field", "error");
+                return;
+            }
+
+            const updateData = {
+                action: 'update',
+                tid: tid,
+                deployBy: deployBy,
+                deployDate: deployDate,
+                rollBy: rollBy,
+                rollDate: rollDate,
+                version: version
+            };
+
+            showToast(`Applying update to TID: ${tid}...`);
+            
+            // Local Update simulation
+            if (deployBy) {
+                record.depl_by = updateData.deployBy;
+                record.depl_date = updateData.deployDate;
+            }
+            if (rollBy) {
+                record.roll_by = updateData.rollBy;
+                record.roll_date = updateData.rollDate;
+                record.version = updateData.version;
+            } else if (version && !rollBy) {
+                // If only version changed
+                record.version = updateData.version;
+            }
+
+            renderUI();
+            
+            const row = document.getElementById(`tid-row-${tid}`);
+            if (row) {
+                row.classList.add('bg-emerald-500/20');
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => row.classList.remove('bg-emerald-500/20'), 3000);
+            }
+
+            // Clear inputs
+            [tidInput, deployByInput, deployDateInput, rollByInput, rollDateInput].forEach(i => i.value = '');
+            versionInput.selectedIndex = 0;
+
+            showToast("Update processed successfully!");
+        }
+
+        function showToast(msg, type = "info") {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.backgroundColor = type === 'error' ? '#ef4444' : '#2563eb';
+            toast.classList.remove('translate-y-24', 'opacity-0');
+            toast.classList.add('-translate-y-6', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.add('translate-y-24', 'opacity-0');
+                toast.classList.remove('-translate-y-6', 'opacity-100');
+            }, 4000);
         }
 
         function setOnlineStatus(type, msg = "") {
@@ -364,13 +529,7 @@
                         <div class="flex flex-col items-center">
                             <i class="fas fa-shield-alt text-3xl text-orange-500 mb-4"></i>
                             <h4 class="text-white font-bold mb-2">Transport Security Error</h4>
-                            <p class="text-slate-400 max-w-md mb-6">The browser's security policy is preventing a direct connection to the Google Sheet. This usually happens if the script is not public.</p>
-                            <div class="bg-slate-800 p-4 rounded-lg text-left text-xs text-slate-400 mb-6 font-mono">
-                                1. Open Google Sheet Script Editor<br>
-                                2. Click Deploy > New Deployment<br>
-                                3. Select Type: Web App<br>
-                                4. Set "Who has access" to "Anyone"
-                            </div>
+                            <p class="text-slate-400 max-w-md mb-6">Security policy blocking connection. Ensure the Apps Script is deployed as a Web App for "Anyone".</p>
                             <button onclick="fetchSheetData()" class="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white transition-all">Retry Handshake</button>
                         </div>
                     </td>
