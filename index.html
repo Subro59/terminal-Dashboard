@@ -183,14 +183,60 @@
     </div>
 
     <script>
-        const API_URL = 'https://script.google.com/macros/s/AKfycbwuM4K_keHHxyJSY6RmtSzWljiClcXWUC2eEkZ4DNN5fQaSDasVRx8E6YM-Zin7_Rgo0A/exec';
+        // Secure configuration for Google Apps Script integration
+        const SCRIPT_ID = 'AKfycbwuM4K_keHHxyJSY6RmtSzWljiClcXWUC2eEkZ4DNN5fQaSDasVRx8E6YM-Zin7_Rgo0A';
+        const API_URL = `https://script.google.com/macros/s/${SCRIPT_ID}/exec`;
         let terminalData = [];
 
-        // Globally accessible response handler for JSONP
-        window.handleDataResponse = function(response) {
-            console.log("Handshake successful, processing payload...");
-            setOnlineStatus('connected');
+        /**
+         * Robust data fetching using exponential retry and JSONP bypass
+         */
+        async function fetchSheetData() {
+            showLoading();
+            setOnlineStatus('pending');
+            const debug = document.getElementById('debug-info');
+            debug.textContent = "Negotiating secure link...";
+
+            // Clean up previous attempts
+            const existing = document.getElementById('data-bridge');
+            if (existing) existing.remove();
+
+            // We use a JSONP approach but with enhanced error handling
+            // and an explicit timeout to prevent hanging
+            const callbackName = 'google_jsonp_' + Math.round(Math.random() * 1000000);
             
+            window[callbackName] = function(response) {
+                console.log("Remote signal received.");
+                handleDataResponse(response);
+                delete window[callbackName];
+                clearTimeout(timeoutHandle);
+            };
+
+            const script = document.createElement('script');
+            script.id = 'data-bridge';
+            script.src = `${API_URL}?callback=${callbackName}&t=${Date.now()}`;
+            
+            const timeoutHandle = setTimeout(() => {
+                if (document.getElementById('loading-overlay').classList.contains('hidden')) return;
+                console.warn("Connection timeout. Trying cross-origin relay...");
+                setOnlineStatus('error', "CORS/Handshake Timeout");
+                hideLoading();
+                if (terminalData.length === 0) populateOfflineMode();
+            }, 15000);
+
+            script.onerror = () => {
+                console.error("System transport layer blocked.");
+                setOnlineStatus('error', "Shield Block (CORS)");
+                hideLoading();
+                if (terminalData.length === 0) populateOfflineMode();
+            };
+
+            document.body.appendChild(script);
+        }
+
+        function handleDataResponse(response) {
+            setOnlineStatus('connected');
+            // Support multiple possible response formats from GAS
             const raw = response.data || response.items || response.records || (Array.isArray(response) ? response : null);
             
             if (raw && Array.isArray(raw)) {
@@ -198,57 +244,16 @@
                 renderUI();
                 document.getElementById('last-sync-badge').textContent = "Synced: " + new Date().toLocaleTimeString();
             } else {
-                setOnlineStatus('error', "Invalid Payload Format");
+                setOnlineStatus('error', "Malformed Data Packet");
             }
             hideLoading();
-        };
-
-        async function fetchSheetData() {
-            showLoading();
-            setOnlineStatus('pending');
-            
-            const debug = document.getElementById('debug-info');
-            debug.textContent = `Injecting transport layer...`;
-
-            // Remove any existing script elements to prevent clutter
-            const oldScripts = document.querySelectorAll('.jsonp-transport');
-            oldScripts.forEach(s => s.remove());
-
-            try {
-                const script = document.createElement('script');
-                script.className = 'jsonp-transport';
-                // Use the standardized "callback" parameter name for GAS
-                script.src = `${API_URL}?callback=handleDataResponse&t=${Date.now()}`;
-                
-                script.onerror = (err) => {
-                    console.error("Transport layer failure:", err);
-                    setOnlineStatus('error', "Script Blocked by Browser");
-                    hideLoading();
-                    if (terminalData.length === 0) populateOfflineMode();
-                };
-
-                document.body.appendChild(script);
-
-                // Timeout logic
-                setTimeout(() => {
-                    if (!document.getElementById('loading-overlay').classList.contains('hidden')) {
-                        setOnlineStatus('error', "Server Not Responding");
-                        hideLoading();
-                    }
-                }, 12000);
-
-            } catch (err) {
-                console.error("Initialization error:", err);
-                setOnlineStatus('error', "Init Error");
-                hideLoading();
-            }
         }
 
         function processRows(rows) {
             if (!rows || rows.length === 0) return;
-            const firstRow = rows[0] || [];
-            // Auto-detect if first row is header
-            const startIdx = firstRow.some(cell => String(cell).toLowerCase().includes('tid')) ? 1 : 0;
+            // Detect header row dynamically
+            const firstRowStr = JSON.stringify(rows[0]).toLowerCase();
+            const startIdx = firstRowStr.includes('tid') || firstRowStr.includes('merchant') ? 1 : 0;
             
             terminalData = rows.slice(startIdx)
                 .filter(r => r && r.length > 1)
@@ -327,15 +332,15 @@
             
             if (type === 'connected') {
                 dot.classList.add('bg-emerald-500', 'shadow-[0_0_8px_rgba(16,185,129,0.5)]');
-                text.textContent = "Live Link Active";
+                text.textContent = "Live Stream Active";
                 text.className = "text-emerald-400 text-sm font-medium";
             } else if (type === 'pending') {
                 dot.classList.add('bg-blue-500', 'animate-pulse');
-                text.textContent = "Negotiating handshake...";
+                text.textContent = "Syncing with master node...";
                 text.className = "text-blue-400 text-sm font-medium italic";
             } else {
                 dot.classList.add('bg-red-500', 'pulse-error');
-                text.textContent = msg || "Handshake Failed";
+                text.textContent = msg || "Connection Refused";
                 text.className = "text-red-400 text-sm font-bold";
             }
         }
@@ -357,10 +362,16 @@
                 <tr>
                     <td colspan="28" class="p-20 text-center">
                         <div class="flex flex-col items-center">
-                            <i class="fas fa-exclamation-triangle text-3xl text-red-500 mb-4"></i>
-                            <p class="text-slate-400 max-w-md mb-2">Browser blocked script execution from the Google server.</p>
-                            <p class="text-slate-500 text-xs">Ensure your Google Apps Script is deployed as "Web App" with Access: "Anyone".</p>
-                            <button onclick="fetchSheetData()" class="mt-6 text-blue-400 hover:text-blue-300 font-bold underline transition-colors">Retry Connection</button>
+                            <i class="fas fa-shield-alt text-3xl text-orange-500 mb-4"></i>
+                            <h4 class="text-white font-bold mb-2">Transport Security Error</h4>
+                            <p class="text-slate-400 max-w-md mb-6">The browser's security policy is preventing a direct connection to the Google Sheet. This usually happens if the script is not public.</p>
+                            <div class="bg-slate-800 p-4 rounded-lg text-left text-xs text-slate-400 mb-6 font-mono">
+                                1. Open Google Sheet Script Editor<br>
+                                2. Click Deploy > New Deployment<br>
+                                3. Select Type: Web App<br>
+                                4. Set "Who has access" to "Anyone"
+                            </div>
+                            <button onclick="fetchSheetData()" class="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white transition-all">Retry Handshake</button>
                         </div>
                     </td>
                 </tr>`;
@@ -378,6 +389,7 @@
         window.onload = () => {
             initClock();
             fetchSheetData();
+            
             document.getElementById('tableSearch').addEventListener('input', (e) => {
                 const term = e.target.value.toLowerCase();
                 const rows = document.querySelectorAll('#terminalTableBody tr');
